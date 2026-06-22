@@ -1,0 +1,7 @@
+target/
+SlipperOS.zip
+__pycache__/
+*.pyc
+docs-server.py
+build-docs.py
+AGENTS.md
