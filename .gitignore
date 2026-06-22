@@ -5,3 +5,9 @@ __pycache__/
 docs-server.py
 build-docs.py
 AGENTS.md
+build/
+*.o
+*.elf
+*.spx
+*.img
+*.bin
