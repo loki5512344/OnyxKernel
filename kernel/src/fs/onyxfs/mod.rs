@@ -9,29 +9,33 @@
 //! management stubs. Backward compatibility with v1 images produced by the
 //! legacy `mkimage` tool is preserved: the detected version is stored in
 //! `G_VERSION` and the per-version inode/dirent sizes are used throughout.
-//!
-//! Module layout:
-//!   `mod.rs`      — shared state (`G_*` statics), block I/O glue, `mount`,
-//!                   `OnyfsStat`, `persist_superblock`, `inode_table_block_count`.
-//!   `journal.rs`  — `journal_log`, `journal_commit`, `journal_recover`.
-//!   `inode.rs`    — inode read/write, allocators, file write/create/mkdir.
-//!   `lookup.rs`   — path resolution, dirent parsing, readdir.
-//!   `compress.rs` — RLE compress / decompress used by snapshots.
-//!   `snapshot.rs` — snapshot create / rollback / list.
+pub mod alloc;
 pub mod compress;
 pub mod inode;
 pub mod journal;
 pub mod lookup;
+pub mod mkdir;
+pub mod mount;
+pub mod read;
+pub mod readdir;
 pub mod snapshot;
+pub mod snapshot_io;
+pub mod write;
 
 pub use compress::*;
 pub use inode::*;
 pub use journal::*;
 pub use lookup::*;
+pub use mkdir::*;
+pub use mount::*;
+pub use read::*;
+pub use readdir::*;
 pub use snapshot::*;
+pub use snapshot_io::*;
+pub use write::*;
 
 use crate::drivers::virtio_req;
-use onyx_core::errno::{Errno, KResult};
+use onyx_core::errno::KResult;
 use onyx_core::formats::{OnyfsSuper, ONYFS_BLOCK_SIZE};
 
 /// VFS-facing stat structure. Kept local (kernel-internal) because the VFS
@@ -121,59 +125,5 @@ pub(super) unsafe fn dirents_per_block() -> usize {
     match *(&raw const G_VERSION) {
         ONYFS_V1 => ONYFS_BLOCK_SIZE / ONYFS_V1_DIRENT_SIZE, // 113
         _ => ONYFS_BLOCK_SIZE / onyx_core::formats::OnyfsDirent::SIZE, // 102 (v2)
-    }
-}
-
-pub unsafe fn mount(dev: usize, lba_offset: u32) -> KResult<()> {
-    *(&raw mut G_DEV) = dev;
-    *(&raw mut G_LBA_BASE) = lba_offset;
-    {
-        let pb = &raw mut G_BUF;
-        read_block(0, &mut *pb)
-    }?;
-    let buf_view: &[u8] = &(*(&raw const G_BUF));
-    let sb_val = OnyfsSuper::from_bytes(buf_view).ok_or(Errno::Inval)?;
-    if sb_val.block_size != ONYFS_BLOCK_SIZE as u32 {
-        return Err(Errno::Inval);
-    }
-    // Detect version from magic. v2 = ONY2, v1 = ONY1 (legacy).
-    let ver = if sb_val.magic == onyx_core::formats::ONYFS_MAGIC {
-        ONYFS_V2
-    } else if sb_val.magic == onyx_core::formats::ONYFS_MAGIC_V1 {
-        ONYFS_V1
-    } else {
-        return Err(Errno::Inval);
-    };
-    *(&raw mut G_VERSION) = ver;
-    *(&raw mut G_SB) = sb_val;
-    // Crash recovery: replay any committed-but-unapplied journal entries
-    // before the filesystem is handed to the VFS layer.
-    journal_recover()?;
-    Ok(())
-}
-
-/// Persist the in-memory superblock back to disk block 0.
-pub(super) unsafe fn persist_superblock() -> KResult<()> {
-    let bytes = (*(&raw const G_SB)).to_bytes();
-    let pb = &raw mut G_BUF;
-    // Zero the block so stale data beyond the superblock doesn't leak.
-    for b in (*pb).iter_mut() {
-        *b = 0;
-    }
-    for i in 0..bytes.len() {
-        (*pb)[i] = bytes[i];
-    }
-    write_block(0, &*pb)
-}
-
-/// Number of inode-table blocks occupied by the current filesystem.
-#[inline]
-pub(super) unsafe fn inode_table_block_count() -> u32 {
-    let ipb = inodes_per_block() as u32;
-    let cnt = (*(&raw const G_SB)).inode_count;
-    if cnt == 0 {
-        1
-    } else {
-        (cnt + ipb - 1) / ipb
     }
 }

@@ -9,7 +9,8 @@
 use crate::arch::trap_frame::TrapFrame;
 use onyx_core::errno::{Errno, KResult};
 
-use super::process::{by_pid, exit, ProcState, G_CURRENT};
+use super::lifecycle::exit;
+use super::process::{by_pid, ProcState, G_CURRENT};
 
 /// Signal number for KILL (POSIX SIGKILL = 9). Always honored, never blocked.
 pub const SIG_KILL: u32 = 9;

@@ -1,10 +1,12 @@
-//! Path resolution, dirent parsing, and readdir support.
+//! Path resolution and dirent parsing.
 //!
 //! `lookup_in` resolves a single name within a directory; `lookup` walks a
 //! slash-separated path starting from the root inode. `parse_dirent` handles
-//! both v1 (36-byte) and v2 (40-byte) dirent layouts. `readdir_entry`
-//! returns one directory entry per call (stateful iteration handled by the
-//! VFS layer).
+//! both v1 (36-byte) and v2 (40-byte) dirent layouts, returning the v2
+//! `OnyfsDirent` struct in both cases. `resolve_dir` resolves a directory
+//! path (returns ENOTDIR if the target is a regular file).
+//!
+//! `readdir_entry` (stateful directory iteration) lives in `readdir.rs`.
 use super::inode::{read_inode, stat};
 use super::{
     dirents_per_block, read_block, OnyfsStat, G_BUF, G_VERSION, ONYFS_V1, ONYFS_V1_DIRENT_SIZE,
@@ -18,7 +20,7 @@ use onyx_core::formats::{
 /// Parse a dirent from the current `G_BUF` contents at the given slot index.
 /// Handles both v1 (36-byte) and v2 (40-byte) layouts, returning the v2
 /// `OnyfsDirent` struct in both cases.
-unsafe fn parse_dirent(slot: usize) -> KResult<OnyfsDirent> {
+pub(super) unsafe fn parse_dirent(slot: usize) -> KResult<OnyfsDirent> {
     let buf_view: &[u8] = &(*(&raw const G_BUF));
     match *(&raw const G_VERSION) {
         ONYFS_V1 => {
@@ -132,70 +134,6 @@ pub unsafe fn lookup(path: &[u8], out: &mut OnyfsStat) -> KResult<u32> {
     }
     stat(cur_ino, out)?;
     Ok(cur_ino)
-}
-
-/// Read a directory entry by index. Returns (inode, name_len, is_dir).
-/// Used by SYS_readdir.
-pub unsafe fn readdir_entry(
-    dir_ino: u32,
-    entry_idx: u32,
-    name_out: *mut u8,
-    name_len: usize,
-) -> KResult<Option<u32>> {
-    let mut inode = OnyfsInode {
-        mode: 0,
-        size: 0,
-        uid: 0,
-        gid: 0,
-        nlink: 0,
-        blocks: [0; ONYFS_DIRECT_BLKS],
-        indirect: 0,
-        double_indirect: 0,
-        crtime: 0,
-        mtime: 0,
-        atime: 0,
-        ctime: 0,
-        flags: 0,
-        reserved: 0,
-    };
-    read_inode(dir_ino, &mut inode)?;
-    // Check it's a directory.
-    if inode.mode & 0o170000 != ONYFS_DT_DIR & 0o170000 {
-        return Err(Errno::NotDir);
-    }
-    let dir_blk = inode.blocks[0];
-    if dir_blk == 0 {
-        return Ok(None);
-    }
-    {
-        let pb = &raw mut G_BUF;
-        read_block(dir_blk, &mut *pb)
-    }?;
-    let dpb = dirents_per_block();
-    if (entry_idx as usize) >= dpb {
-        return Ok(None);
-    }
-    let d = parse_dirent(entry_idx as usize)?;
-    if d.inode == 0 {
-        return Ok(None);
-    }
-    // Copy name (NUL-terminated) to caller's buffer.
-    let nl = if d.name_len > 0 && (d.name_len as usize) <= ONYFS_NAME_MAX {
-        d.name_len as usize
-    } else {
-        d.name
-            .iter()
-            .position(|&b| b == 0)
-            .unwrap_or(ONYFS_NAME_MAX)
-    };
-    let copy_n = nl.min(name_len.saturating_sub(1));
-    for i in 0..copy_n {
-        *name_out.add(i) = d.name[i];
-    }
-    if copy_n < name_len {
-        *name_out.add(copy_n) = 0;
-    }
-    Ok(Some(d.inode))
 }
 
 /// Resolve a directory path to inode number.

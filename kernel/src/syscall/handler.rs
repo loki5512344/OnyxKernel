@@ -10,13 +10,28 @@ use crate::proc;
 use crate::syscall::abi::*;
 use onyx_core::errno::Errno;
 
-use super::{fs_sys, proc_sys, ring_sys, snap_sys};
+use super::{fs_sys, fs_sys2, proc_sys, ring_sys, snap_sys};
 
 const USER_BASE: u64 = 0x10000;
 const USER_TOP: u64 = 0x4000_0000;
 
 pub(super) fn user_ptr_ok(p: u64, len: u64) -> bool {
     p >= USER_BASE && p.checked_add(len).is_some_and(|end| end <= USER_TOP)
+}
+
+/// Validate `path` is a readable user pointer, then parse it as a NUL-terminated
+/// C string (capped at 256 bytes) into a `&[u8]` slice. Returns `None` if the
+/// pointer is invalid (caller should return `Errno::Inval`).
+pub(super) unsafe fn parse_user_path(path: u64) -> Option<&'static [u8]> {
+    if !user_ptr_ok(path, 1) {
+        return None;
+    }
+    let mut len = 0usize;
+    let p = path as *const u8;
+    while *p.add(len) != 0 && len < 256 {
+        len += 1;
+    }
+    Some(core::slice::from_raw_parts(p, len))
 }
 
 /// ACL: check if current process ring can call this syscall.
@@ -64,11 +79,11 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
         SYS_close => fs_sys::sys_close(a0),
         SYS_lseek => fs_sys::sys_lseek(a0, a1 as i64, a2 as u32),
         SYS_stat => fs_sys::sys_stat(a0, a1),
-        SYS_exec => fs_sys::sys_exec(tf, a0),
-        SYS_sbrk => fs_sys::sys_sbrk(a0 as i64),
+        SYS_exec => fs_sys2::sys_exec(tf, a0),
+        SYS_sbrk => fs_sys2::sys_sbrk(a0 as i64),
         SYS_spawn => proc_sys::sys_spawn(a0, a1 as u8),
         SYS_wait => proc_sys::sys_wait(tf, a0),
-        SYS_readdir => fs_sys::sys_readdir(a0, a1, a2),
+        SYS_readdir => fs_sys2::sys_readdir(a0, a1, a2),
         SYS_getring => ring_sys::sys_getring(),
         SYS_dropring => ring_sys::sys_dropring(a0 as u8),
         SYS_snapshot_create => snap_sys::sys_snapshot_create(a0),
@@ -76,9 +91,9 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
         SYS_snapshot_list => snap_sys::sys_snapshot_list(a0, a1),
         SYS_kill => proc_sys::sys_kill(a0 as u32, a1 as u32),
         SYS_sigmask => proc_sys::sys_sigmask(a0 as u32, a1 as u32),
-        SYS_write_fd => fs_sys::sys_write_fd(a0, a1, a2),
-        SYS_create => fs_sys::sys_create(a0, a1, a2),
-        SYS_mkdir => fs_sys::sys_mkdir(a0),
+        SYS_write_fd => fs_sys2::sys_write_fd(a0, a1, a2),
+        SYS_create => fs_sys2::sys_create(a0, a1, a2),
+        SYS_mkdir => fs_sys2::sys_mkdir(a0),
         SYS_brk | SYS_mmap => Errno::NoSys.as_i64(),
         _ => Errno::NoSys.as_i64(),
     }
