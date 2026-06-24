@@ -53,7 +53,7 @@ impl From<u8> for Arg<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "none")))]
 mod tests {
     use super::super::writer::{vformat, Write};
     use super::*;

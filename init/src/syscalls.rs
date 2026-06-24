@@ -112,8 +112,14 @@ pub unsafe fn exec(path: *const u8) -> i64 {
     ret
 }
 
-pub const SYS_CREATE: u64 = 25;
+pub const SYS_CHAN_CREATE: u64 = 27;
+pub const SYS_CHAN_CONNECT: u64 = 28;
+pub const SYS_CHAN_SEND: u64 = 29;
+pub const SYS_CHAN_RECV: u64 = 30;
+pub const SYS_CHAN_CLOSE: u64 = 31;
+
 pub const SYS_WRITE_FD: u64 = 24;
+pub const SYS_CREATE: u64 = 25;
 pub const SYS_MKDIR: u64 = 26;
 
 #[inline]
@@ -134,5 +140,40 @@ pub unsafe fn write_fd(fd: u64, buf: *const u8, len: usize) -> i64 {
 pub unsafe fn mkdir(path: *const u8) -> i64 {
     let ret: i64;
     asm!("ecall", in("a7") SYS_MKDIR, in("a0") path as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn chan_create() -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_CHAN_CREATE, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn chan_connect(chan_id: u32) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_CHAN_CONNECT, in("a0") chan_id as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn chan_send(chan_id: u32, buf: *const u8, len: u32) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_CHAN_SEND, in("a0") chan_id as usize, in("a1") buf as usize, in("a2") len as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn chan_recv(chan_id: u32, buf: *mut u8, len: u32) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_CHAN_RECV, in("a0") chan_id as usize, in("a1") buf as usize, in("a2") len as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn chan_close(chan_id: u32) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_CHAN_CLOSE, in("a0") chan_id as usize, lateout("a0") ret);
     ret
 }

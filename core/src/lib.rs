@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), no_std)]
+#![no_std]
 #![cfg_attr(not(test), no_builtins)]
 #![warn(clippy::all)]
 #![allow(

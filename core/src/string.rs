@@ -84,7 +84,7 @@ pub unsafe extern "C" fn rust_memmove(d: *mut u8, s: *const u8, n: usize) -> *mu
     memmove(d, s, n)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "none")))]
 mod tests {
     use super::*;
     #[test]

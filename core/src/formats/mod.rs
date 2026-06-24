@@ -12,6 +12,7 @@ pub mod misc;
 pub mod onyxfs_fmt;
 pub mod segment;
 pub mod snapshot;
+#[cfg(not(target_os = "none"))]
 pub mod tests;
 
 // Re-export everything for backward compatibility.
