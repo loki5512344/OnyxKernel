@@ -32,6 +32,8 @@ pub const SYS_chan_connect: u64 = 28; // chan_connect(chan_id) -> 0/-err
 pub const SYS_chan_send: u64 = 29; // chan_send(chan_id, buf, len) -> n/-err
 pub const SYS_chan_recv: u64 = 30; // chan_recv(chan_id, buf, len) -> n/-err
 pub const SYS_chan_close: u64 = 31; // chan_close(chan_id) -> 0/-err
+pub const SYS_chan_create_named: u64 = 32; // chan_create_named(name_ptr) -> chan_id / -err (root-only)
+pub const SYS_chan_open: u64 = 33; // chan_open(name_ptr) -> chan_id / -err
 
 pub const SEEK_SET: u32 = 0;
 pub const SEEK_CUR: u32 = 1;

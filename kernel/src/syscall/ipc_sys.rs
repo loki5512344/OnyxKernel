@@ -9,13 +9,41 @@ use crate::ipc;
 use crate::proc;
 use onyx_core::errno::Errno;
 
-use super::handler::user_ptr_ok;
+use super::handler::{parse_user_path, user_ptr_ok};
 
 /// SYS_chan_create(): create a new IPC channel owned by the caller (root-only
 /// via the ACL in `handler::syscall_allowed`). Returns the channel ID.
 pub(super) unsafe fn sys_chan_create() -> i64 {
     let pid = proc::current_pid();
     match ipc::create(pid) {
+        Ok(id) => id as i64,
+        Err(e) => e.as_i64(),
+    }
+}
+
+/// SYS_chan_create_named(name_ptr): create a named channel. `name_ptr` is a
+/// NUL-terminated user-space string. Root-only via ACL.
+pub(super) unsafe fn sys_chan_create_named(name_ptr: u64) -> i64 {
+    let name = match parse_user_path(name_ptr) {
+        Some(n) => n,
+        None => return Errno::Inval.as_i64(),
+    };
+    let pid = proc::current_pid();
+    match ipc::create_named(name, pid) {
+        Ok(id) => id as i64,
+        Err(e) => e.as_i64(),
+    }
+}
+
+/// SYS_chan_open(name_ptr): open a named channel. `name_ptr` is a NUL-terminated
+/// user-space string. Returns the channel ID. Available to all rings.
+pub(super) unsafe fn sys_chan_open(name_ptr: u64) -> i64 {
+    let name = match parse_user_path(name_ptr) {
+        Some(n) => n,
+        None => return Errno::Inval.as_i64(),
+    };
+    let pid = proc::current_pid();
+    match ipc::open_by_name(name, pid) {
         Ok(id) => id as i64,
         Err(e) => e.as_i64(),
     }

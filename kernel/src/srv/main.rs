@@ -75,6 +75,8 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
     }
     vfs::mount_procfs();
     crate::kinf!("vfs", "procfs mounted at /proc");
+    vfs::mount_ipcfs();
+    crate::kinf!("vfs", "ipcfs mounted at /ipc");
 
     // Load /font/default.psf
     (|| -> KResult<()> {

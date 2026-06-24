@@ -3,7 +3,7 @@ use super::{
     alloc_fd, fd_check, fd_check_perm, fd_clear, fd_get, fd_set, fd_token, fd_update_pos, FdToken,
     Fs, G_ROOT_FS, PERM_READ, PERM_SEEK, PERM_WRITE,
 };
-use crate::fs::{fat32, onyxfs, procfs};
+use crate::fs::{fat32, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};
 
 pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
@@ -19,6 +19,11 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
         Fs::Proc => {
             let ino = procfs::lookup(subpath)?;
             let st = procfs::stat(ino)?;
+            (ino, st.size)
+        }
+        Fs::Ipc => {
+            let ino = ipcfs::lookup(subpath)?;
+            let st = ipcfs::stat(ino)?;
             (ino, st.size)
         }
         _ => {
@@ -62,6 +67,7 @@ pub unsafe fn read(token: FdToken, buf: *mut u8, len: u32) -> KResult<u32> {
         Fs::Onyx => onyxfs::read(fd.ino, buf, fd.pos, to_read)?,
         Fs::Fat32 => fat32::read(fd.ino, buf, fd.pos, to_read)?,
         Fs::Proc => procfs::read(fd.ino, buf, fd.pos, to_read)?,
+        Fs::Ipc => ipcfs::read(fd.ino, buf, fd.pos, to_read)?,
         Fs::None => return Err(Errno::Inval),
     };
     fd_update_pos(idx, fd.pos + read_n);
@@ -74,6 +80,7 @@ pub unsafe fn write(token: FdToken, buf: *const u8, len: u32) -> KResult<u32> {
     let written = match fd.fs {
         Fs::Onyx => onyxfs::write(fd.ino, buf, fd.pos, len)?,
         Fs::Proc => return Err(Errno::Perm),
+        Fs::Ipc => ipcfs::write(fd.ino, buf, fd.pos, len)?,
         _ => return Err(Errno::NoSys),
     };
     let new_pos = fd.pos + written;

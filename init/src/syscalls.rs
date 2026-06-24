@@ -117,6 +117,8 @@ pub const SYS_CHAN_CONNECT: u64 = 28;
 pub const SYS_CHAN_SEND: u64 = 29;
 pub const SYS_CHAN_RECV: u64 = 30;
 pub const SYS_CHAN_CLOSE: u64 = 31;
+pub const SYS_CHAN_CREATE_NAMED: u64 = 32;
+pub const SYS_CHAN_OPEN: u64 = 33;
 
 pub const SYS_WRITE_FD: u64 = 24;
 pub const SYS_CREATE: u64 = 25;
@@ -175,5 +177,19 @@ pub unsafe fn chan_recv(chan_id: u32, buf: *mut u8, len: u32) -> i64 {
 pub unsafe fn chan_close(chan_id: u32) -> i64 {
     let ret: i64;
     asm!("ecall", in("a7") SYS_CHAN_CLOSE, in("a0") chan_id as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn chan_create_named(name: *const u8) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_CHAN_CREATE_NAMED, in("a0") name as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn chan_open(name: *const u8) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_CHAN_OPEN, in("a0") name as usize, lateout("a0") ret);
     ret
 }

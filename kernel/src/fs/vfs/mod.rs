@@ -4,11 +4,11 @@
 //! `Fs` enum, plus the constants and the `mount_root`/`init` entry points.
 //! File operations (open/close/read/write/stat/lseek/create/mkdir) live in
 //! `file.rs`; `readdir` lives in `dir.rs`.
-use crate::fs::{fat32, onyxfs, procfs};
+use crate::fs::{fat32, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};
 
 pub const VFS_MAX_FDS: usize = 16;
-pub const MAX_MOUNTS: usize = 4;
+pub const MAX_MOUNTS: usize = 5;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Fs {
@@ -16,6 +16,7 @@ pub enum Fs {
     Onyx = 1,
     Fat32 = 2,
     Proc = 3,
+    Ipc = 4,
 }
 
 #[derive(Clone, Copy)]
@@ -30,12 +31,20 @@ pub(super) static mut G_MOUNTS: [MountEntry; MAX_MOUNTS] = [
     MountEntry { path: b"", fs: Fs::None },
     MountEntry { path: b"", fs: Fs::None },
     MountEntry { path: b"", fs: Fs::None },
+    MountEntry { path: b"", fs: Fs::None },
 ];
 
 pub unsafe fn mount_procfs() {
     G_MOUNTS[0] = MountEntry {
         path: b"proc",
         fs: Fs::Proc,
+    };
+}
+
+pub unsafe fn mount_ipcfs() {
+    G_MOUNTS[1] = MountEntry {
+        path: b"ipc",
+        fs: Fs::Ipc,
     };
 }
 

@@ -1,33 +1,24 @@
-//! IPC channels — bidirectional ring buffers between a root service (owner)
-//! and a user process (client).
-//!
-//! A root-space process creates a channel (`create`) and gets a channel ID.
-//! A user process connects to it (`connect`); then either side may `send` /
-//! `recv`. The buffer is a fixed 4 KiB ring. When full, `send` blocks (adds
-//! the caller to the send_wait queue); when empty, `recv` blocks (adds the
-//! caller to the recv_wait queue). After every successful `send` the
-//! recv_wait queue is woken, and after every successful `recv` the send_wait
-//! queue is woken.
 use crate::arch::trap_frame::TrapFrame;
 use onyx_core::errno::{Errno, KResult};
 
 const CHAN_MAX: usize = 32;
 const CHAN_BUF_SIZE: usize = 4096;
+const CHAN_NAME_MAX: usize = 32;
+const CHAN_MAX_CLIENTS: usize = 4;
 
 #[derive(Clone, Copy)]
 pub struct Channel {
     pub buf: [u8; CHAN_BUF_SIZE],
     pub head: u32,
     pub tail: u32,
-    /// root service that created it.
     pub owner_pid: u32,
-    /// user process that connected (0 until `connect` is called).
-    pub client_pid: u32,
+    pub clients: [u32; CHAN_MAX_CLIENTS],
+    pub num_clients: u32,
+    pub name: [u8; CHAN_NAME_MAX],
+    pub name_len: u8,
     pub used: bool,
     pub closed: bool,
-    /// Linked list of processes blocked waiting to send (channel full).
     pub send_wait: *mut crate::proc::Proc,
-    /// Linked list of processes blocked waiting to recv (channel empty).
     pub recv_wait: *mut crate::proc::Proc,
 }
 
@@ -36,48 +27,133 @@ static mut G_CHANNELS: [Channel; CHAN_MAX] = [Channel {
     head: 0,
     tail: 0,
     owner_pid: 0,
-    client_pid: 0,
+    clients: [0; CHAN_MAX_CLIENTS],
+    num_clients: 0,
+    name: [0; CHAN_NAME_MAX],
+    name_len: 0,
     used: false,
     closed: false,
     send_wait: core::ptr::null_mut(),
     recv_wait: core::ptr::null_mut(),
 }; CHAN_MAX];
 
-/// Create a new channel owned by `owner_pid`. Returns the channel ID.
+fn pid_allowed(ch: &Channel, pid: u32) -> bool {
+    if pid == ch.owner_pid {
+        return true;
+    }
+    for &c in ch.clients[..ch.num_clients as usize].iter() {
+        if c == pid {
+            return true;
+        }
+    }
+    false
+}
+
+/// Create an anonymous channel owned by `owner_pid`.
 pub unsafe fn create(owner_pid: u32) -> KResult<u32> {
-    let p = &raw mut G_CHANNELS;
     for i in 0..CHAN_MAX {
-        if !(*p)[i].used {
-            (*p)[i].used = true;
-            (*p)[i].owner_pid = owner_pid;
-            (*p)[i].client_pid = 0;
-            (*p)[i].head = 0;
-            (*p)[i].tail = 0;
-            (*p)[i].closed = false;
-            (*p)[i].send_wait = core::ptr::null_mut();
-            (*p)[i].recv_wait = core::ptr::null_mut();
+        if !G_CHANNELS[i].used {
+            G_CHANNELS[i] = Channel {
+                buf: [0; CHAN_BUF_SIZE],
+                head: 0,
+                tail: 0,
+                owner_pid,
+                clients: [0; CHAN_MAX_CLIENTS],
+                num_clients: 0,
+                name: [0; CHAN_NAME_MAX],
+                name_len: 0,
+                used: true,
+                closed: false,
+                send_wait: core::ptr::null_mut(),
+                recv_wait: core::ptr::null_mut(),
+            };
             return Ok(i as u32);
         }
     }
     Err(Errno::NoMem)
 }
 
-/// Attach `client_pid` to an existing channel as the client endpoint.
+/// Create a named channel. Name lookup is case-sensitive.
+pub unsafe fn create_named(name: &[u8], owner_pid: u32) -> KResult<u32> {
+    if name.is_empty() || name.len() > CHAN_NAME_MAX - 1 {
+        return Err(Errno::Inval);
+    }
+    // Check for duplicate name.
+    if find_by_name(name).is_some() {
+        return Err(Errno::Exist);
+    }
+    let id = create(owner_pid)?;
+    let ch = &mut G_CHANNELS[id as usize];
+    let nlen = name.len().min(CHAN_NAME_MAX - 1);
+    ch.name[..nlen].copy_from_slice(&name[..nlen]);
+    ch.name_len = nlen as u8;
+    Ok(id)
+}
+
+/// Find a channel by name. Returns the channel ID if found.
+pub unsafe fn find_by_name(name: &[u8]) -> Option<u32> {
+    for i in 0..CHAN_MAX {
+        let ch = &G_CHANNELS[i];
+        if ch.used && ch.name_len as usize == name.len() && &ch.name[..ch.name_len as usize] == name {
+            return Some(i as u32);
+        }
+    }
+    None
+}
+
+/// Open a named channel: find it and connect the calling process as a client.
+pub unsafe fn open_by_name(name: &[u8], client_pid: u32) -> KResult<u32> {
+    let id = find_by_name(name).ok_or(Errno::NoEnt)?;
+    let ch = &mut G_CHANNELS[id as usize];
+    if ch.num_clients as usize >= CHAN_MAX_CLIENTS {
+        return Err(Errno::NoMem);
+    }
+    // Check for duplicate connection.
+    for &c in ch.clients[..ch.num_clients as usize].iter() {
+        if c == client_pid {
+            return Ok(id); // Already connected
+        }
+    }
+    ch.clients[ch.num_clients as usize] = client_pid;
+    ch.num_clients += 1;
+    Ok(id)
+}
+
+/// Disconnect a client from a channel.
+pub unsafe fn disconnect(chan_id: u32, pid: u32) {
+    if chan_id as usize >= CHAN_MAX {
+        return;
+    }
+    let ch = &mut G_CHANNELS[chan_id as usize];
+    if !ch.used {
+        return;
+    }
+    for i in 0..ch.num_clients as usize {
+        if ch.clients[i] == pid {
+            ch.clients[i] = ch.clients[ch.num_clients as usize - 1];
+            ch.num_clients -= 1;
+            return;
+        }
+    }
+}
+
+/// Attach `client_pid` to an existing channel by numeric ID.
 pub unsafe fn connect(chan_id: u32, client_pid: u32) -> KResult<()> {
-    let p = &raw mut G_CHANNELS;
     if chan_id as usize >= CHAN_MAX {
         return Err(Errno::Inval);
     }
-    if !(*p)[chan_id as usize].used {
+    let ch = &mut G_CHANNELS[chan_id as usize];
+    if !ch.used {
         return Err(Errno::NoEnt);
     }
-    (*p)[chan_id as usize].client_pid = client_pid;
+    if ch.num_clients as usize >= CHAN_MAX_CLIENTS {
+        return Err(Errno::NoMem);
+    }
+    ch.clients[ch.num_clients as usize] = client_pid;
+    ch.num_clients += 1;
     Ok(())
 }
 
-// ── Wait-queue helpers ────────────────────────────────────────────────────
-
-/// Add the current process to a wait queue and set its state to `Waiting`.
 unsafe fn wait_enqueue(wait_head: &mut *mut crate::proc::Proc) {
     let p = crate::proc::current() as *mut crate::proc::Proc;
     (*p).state = crate::proc::ProcState::Waiting;
@@ -85,8 +161,6 @@ unsafe fn wait_enqueue(wait_head: &mut *mut crate::proc::Proc) {
     *wait_head = p;
 }
 
-/// Transition every process in a wait queue back to `Ready` and clear the
-/// queue.
 unsafe fn wait_wake_all(wait_head: &mut *mut crate::proc::Proc) {
     let mut cur = *wait_head;
     while !cur.is_null() {
@@ -98,43 +172,30 @@ unsafe fn wait_wake_all(wait_head: &mut *mut crate::proc::Proc) {
     *wait_head = core::ptr::null_mut();
 }
 
-// ── Public API ────────────────────────────────────────────────────────────
-
-/// Write `len` bytes from `buf` into the channel ring buffer. Only the owner
-/// or the client may send. Returns the number of bytes sent.
-///
-/// If the buffer cannot hold the entire message **and** `tf` is `Some`, the
-/// current process is blocked (added to the send_wait queue) and the CPU is
-/// yielded. When space becomes available (after a `recv`) the process is
-/// woken. If `tf` is `None`, the old non-blocking `Errno::Busy` behaviour is
-/// preserved.
 pub unsafe fn send(
     chan_id: u32,
     buf: *const u8,
     len: u32,
     tf: Option<&mut TrapFrame>,
 ) -> KResult<u32> {
-    let p = &raw mut G_CHANNELS;
     if chan_id as usize >= CHAN_MAX {
         return Err(Errno::Inval);
     }
-    let ch = &mut (*p)[chan_id as usize];
+    let ch = &mut G_CHANNELS[chan_id as usize];
     if !ch.used || ch.closed {
         return Err(Errno::Pipe);
     }
     let cur_pid = crate::proc::current_pid();
-    if cur_pid != ch.owner_pid && cur_pid != ch.client_pid {
+    if !pid_allowed(ch, cur_pid) {
         return Err(Errno::Perm);
     }
 
     let available = CHAN_BUF_SIZE as u32 - ch.tail.wrapping_sub(ch.head);
     if available < len {
         if let Some(tf) = tf {
-            // Block: add to send_wait queue and yield.
             wait_enqueue(&mut ch.send_wait);
             crate::proc::scheduler::NEED_RESCHED = true;
             crate::proc::scheduler::sched_yield(tf);
-            // If we reach here, no context switch happened (would deadlock).
             return Err(Errno::Busy);
         }
         return Err(Errno::Busy);
@@ -148,7 +209,6 @@ pub unsafe fn send(
         written += 1;
     }
 
-    // Wake any processes blocked on recv — data is now available.
     if !ch.recv_wait.is_null() {
         wait_wake_all(&mut ch.recv_wait);
         crate::proc::scheduler::NEED_RESCHED = true;
@@ -156,41 +216,30 @@ pub unsafe fn send(
     Ok(written)
 }
 
-/// Read up to `len` bytes into `buf` from the channel ring buffer. Only the
-/// owner or the client may recv. Returns the number of bytes read (0 if the
-/// channel is empty and no blocking was requested).
-///
-/// If the buffer is empty **and** `tf` is `Some`, the current process is
-/// blocked (added to the recv_wait queue) and the CPU is yielded. When data
-/// arrives (after a `send`) the process is woken. If `tf` is `None`, the old
-/// non-blocking behaviour (returns `Ok(0)` when empty) is preserved.
 pub unsafe fn recv(
     chan_id: u32,
     buf: *mut u8,
     len: u32,
     tf: Option<&mut TrapFrame>,
 ) -> KResult<u32> {
-    let p = &raw mut G_CHANNELS;
     if chan_id as usize >= CHAN_MAX {
         return Err(Errno::Inval);
     }
-    let ch = &mut (*p)[chan_id as usize];
+    let ch = &mut G_CHANNELS[chan_id as usize];
     if !ch.used || ch.closed {
         return Err(Errno::Pipe);
     }
     let cur_pid = crate::proc::current_pid();
-    if cur_pid != ch.owner_pid && cur_pid != ch.client_pid {
+    if !pid_allowed(ch, cur_pid) {
         return Err(Errno::Perm);
     }
 
     let available = ch.tail.wrapping_sub(ch.head);
     if available == 0 {
         if let Some(tf) = tf {
-            // Block: add to recv_wait queue and yield.
             wait_enqueue(&mut ch.recv_wait);
             crate::proc::scheduler::NEED_RESCHED = true;
             crate::proc::scheduler::sched_yield(tf);
-            // If we reach here, no context switch happened (would deadlock).
             return Ok(0);
         }
         return Ok(0);
@@ -205,7 +254,6 @@ pub unsafe fn recv(
         read += 1;
     }
 
-    // Wake any processes blocked on send — space is now available.
     if !ch.send_wait.is_null() {
         wait_wake_all(&mut ch.send_wait);
         crate::proc::scheduler::NEED_RESCHED = true;
@@ -213,13 +261,45 @@ pub unsafe fn recv(
     Ok(read)
 }
 
-/// Close and free a channel.
 pub unsafe fn close(chan_id: u32) -> KResult<()> {
-    let p = &raw mut G_CHANNELS;
     if chan_id as usize >= CHAN_MAX {
         return Err(Errno::Inval);
     }
-    (*p)[chan_id as usize].closed = true;
-    (*p)[chan_id as usize].used = false;
+    let ch = &mut G_CHANNELS[chan_id as usize];
+    if !ch.used {
+        return Err(Errno::NoEnt);
+    }
+    ch.closed = true;
+    ch.used = false;
     Ok(())
+}
+
+/// Return number of named channels (for ipcfs readdir).
+pub unsafe fn named_count() -> u32 {
+    let mut n = 0;
+    for i in 0..CHAN_MAX {
+        if G_CHANNELS[i].used && G_CHANNELS[i].name_len > 0 {
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Get the name of a channel by index in the named-channel list (for readdir).
+/// Returns `None` when there are no more names for the given index.
+pub unsafe fn named_by_index(idx: u32) -> Option<(&'static [u8], u32)> {
+    let mut n = 0;
+    for i in 0..CHAN_MAX {
+        if G_CHANNELS[i].used && G_CHANNELS[i].name_len > 0 {
+            if n == idx {
+                let len = G_CHANNELS[i].name_len as usize;
+                return Some((
+                    &G_CHANNELS[i].name[..len],
+                    i as u32,
+                ));
+            }
+            n += 1;
+        }
+    }
+    None
 }

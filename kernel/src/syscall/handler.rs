@@ -51,7 +51,8 @@ fn syscall_allowed(nr: u64, ring: u8) -> bool {
         | SYS_kill
         | SYS_create
         | SYS_mkdir
-        | SYS_chan_create => ring <= proc::PROC_RING_ROOT,
+        | SYS_chan_create
+        | SYS_chan_create_named => ring <= proc::PROC_RING_ROOT,
         // Stubbed:
         SYS_brk | SYS_mmap => false,
         _ => false,
@@ -97,6 +98,8 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
         SYS_create => fs_sys2::sys_create(a0, a1, a2),
         SYS_mkdir => fs_sys2::sys_mkdir(a0),
         SYS_chan_create => ipc_sys::sys_chan_create(),
+        SYS_chan_create_named => ipc_sys::sys_chan_create_named(a0),
+        SYS_chan_open => ipc_sys::sys_chan_open(a0),
         SYS_chan_connect => ipc_sys::sys_chan_connect(a0 as u32),
         SYS_chan_send => ipc_sys::sys_chan_send(tf, a0 as u32, a1, a2),
         SYS_chan_recv => ipc_sys::sys_chan_recv(tf, a0 as u32, a1, a2),
