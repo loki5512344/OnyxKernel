@@ -52,18 +52,21 @@ pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult
         let end = s.vaddr + s.memsz;
         let mut file_pos: u64 = 0;
         while va < end {
-            let page_pa = pmm::alloc_zero()?;
-            let existing = vmm::translate_user(root_pa, va);
+            let page_base = va & !0xFFF;
+            let existing = vmm::translate_user(root_pa, page_base);
+            let mut page_pa = 0;
             if existing == 0 {
-                vmm::map_one_pub(root_pa, va, page_pa, (s.flags as u64) | PTE_U, 0)?;
+                page_pa = pmm::alloc_zero()?;
+                vmm::map_one_pub(root_pa, page_base, page_pa, (s.flags as u64) | PTE_U, 0)?;
             }
-            let page_va_end = (va + 4096).min(end);
+            let page_end = page_base + 4096;
+            let page_va_end = page_end.min(end);
             let copy_len = (page_va_end - va).min(s.filesz.saturating_sub(file_pos));
             if copy_len > 0 {
                 let abs_off = s.offset as u64 + file_pos;
                 let src = image.add(abs_off as usize);
                 let dst = if existing != 0 {
-                    existing as *mut u8
+                    (existing as *mut u8).add((va & 0xFFF) as usize)
                 } else {
                     (page_pa as *mut u8).add((va & 0xFFF) as usize)
                 };

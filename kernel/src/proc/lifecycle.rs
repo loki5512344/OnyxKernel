@@ -30,6 +30,7 @@ pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> {
     for fd in (*p).fds.iter_mut() {
         *fd = crate::fs::vfs::VfsFd::default();
     }
+    (*p).wait_next = ptr::null_mut();
     (*p).next = G_PROC_LIST;
     G_PROC_LIST = p;
     Ok(p)

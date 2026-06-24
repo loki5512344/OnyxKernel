@@ -27,16 +27,7 @@ unsafe fn do_user_passwd() {
     syscalls::write(1, b"Current password: ".as_ptr(), 18);
     let old_n = read_line(&mut old_pass);
 
-    let stored = match auth::read_shadow_password(b"root") {
-        Ok(p) => p,
-        Err(_) => {
-            syscalls::write(1, b"passwd: Authentication failure\n".as_ptr(), 33);
-            syscalls::exit(1);
-        }
-    };
-
-    let stored_len = stored.iter().position(|&b| b == 0).unwrap_or(stored.len());
-    if old_n.len() != stored_len || !const_time_eq(old_n, &stored[..stored_len]) {
+    if !auth::verify_shadow_password(b"root", old_n) {
         syscalls::write(1, b"passwd: Authentication failure\n".as_ptr(), 33);
         syscalls::exit(1);
     }
@@ -50,7 +41,7 @@ unsafe fn do_user_passwd() {
     let n2 = read_line(&mut confirm);
     syscalls::write(1, b"\n".as_ptr(), 1);
 
-    if n1.is_empty() || n1.len() != n2.len() || !const_time_eq(n1, n2) {
+    if n1.is_empty() || n1.len() != n2.len() || !auth::const_time_eq(n1, n2) {
         syscalls::write(1, b"passwd: Passwords do not match\n".as_ptr(), 34);
         syscalls::exit(1);
     }
@@ -79,7 +70,7 @@ unsafe fn do_root_passwd() {
     let n2 = read_line(&mut confirm);
     syscalls::write(1, b"\n".as_ptr(), 1);
 
-    if n1.is_empty() || n1.len() != n2.len() || !const_time_eq(n1, n2) {
+    if n1.is_empty() || n1.len() != n2.len() || !auth::const_time_eq(n1, n2) {
         syscalls::write(1, b"passwd: Passwords do not match\n".as_ptr(), 34);
         syscalls::exit(1);
     }
@@ -100,17 +91,6 @@ unsafe fn read_line(buf: &mut [u8]) -> &[u8] {
         n -= 1;
     }
     &buf[..n]
-}
-
-fn const_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut result = 0u8;
-    for i in 0..a.len() {
-        result |= a[i] ^ b[i];
-    }
-    result == 0
 }
 
 #[panic_handler]

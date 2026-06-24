@@ -27,3 +27,7 @@ path = "src/useradd.rs"
 [[bin]]
 name = "onyx-userdel"
 path = "src/userdel.rs"
+
+[[bin]]
+name = "onyx-hello"
+path = "src/hello.rs"

@@ -52,6 +52,8 @@ pub struct Proc {
     pub fds: [crate::fs::vfs::VfsFd; PROC_MAX_FDS],
     /// Linked list pointer — next process in the global list.
     pub next: *mut Proc,
+    /// Wait queue pointer — next process in an IPC wait queue (send/recv).
+    pub wait_next: *mut Proc,
 }
 
 impl Proc {
@@ -83,6 +85,7 @@ impl Proc {
                 epoch: 0,
             }; PROC_MAX_FDS],
             next: ptr::null_mut(),
+            wait_next: ptr::null_mut(),
         }
     }
 }

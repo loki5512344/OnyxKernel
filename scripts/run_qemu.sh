@@ -2,21 +2,15 @@
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
-BOOT_DIR="${ONYXBOOT_DIR:-/home/z/my-project/OnyxBoot}"
-RISCV_TOOLS="${RISCV_TOOLS:-/home/z/my-project/riscv-tools/usr/bin}"
-export PATH="$RISCV_TOOLS:$HOME/.cargo/bin:$PATH"
-export LD_LIBRARY_PATH="/home/z/my-project/riscv-tools/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+BOOT_DIR="${ONYXBOOT_DIR:-$ROOT/../OnyxBoot}"
 
-# Build OnyxBoot if needed
-if [ ! -f "$BOOT_DIR/bootloader.bin" ]; then
-    echo "==> Building OnyxBoot"
-    make -C "$BOOT_DIR" CROSS=riscv64-linux-gnu clean all 2>&1 | tail -3
-fi
+# Build OnyxBoot bootloader
+echo "==> Building OnyxBoot"
+make -C "$BOOT_DIR" CROSS=riscv64-elf clean all 2>&1 | tail -3
 
 # Build OnyxKernel + init + tools
 echo "==> Building OnyxKernel"
 cd "$ROOT"
-. "$HOME/.cargo/env"
 cargo build --release -p onyx_kernel --target riscv64gc-unknown-none-elf 2>&1 | tail -3
 cargo build --release -p onyx_init --target riscv64gc-unknown-none-elf 2>&1 | tail -3
 cargo build --release -p onyx_tools 2>&1 | tail -3
@@ -26,6 +20,7 @@ BUILD="$ROOT/build"
 mkdir -p "$BUILD"
 echo "==> Converting userland ELFs → .onx"
 "$ROOT/target/release/elf2onx" --ring=1 "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-init" "$BUILD/init.onx"
+"$ROOT/target/release/elf2onx" --ring=1 "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-hello" "$BUILD/hello.onx"
 "$ROOT/target/release/elf2onx" --ring=1 "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-login" "$BUILD/login.onx"
 "$ROOT/target/release/elf2onx" "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-osh" "$BUILD/osh.onx"
 "$ROOT/target/release/elf2onx" "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-passwd" "$BUILD/passwd.onx"
@@ -45,6 +40,7 @@ dir /etc
 dir /service
 dir /users
 dir /font
+file $BUILD/hello.onx /bin/hello.onx --ring=1
 file $BUILD/init.onx /bin/init --ring=1
 file $BUILD/login.onx /bin/login --ring=1
 file $BUILD/osh.onx /bin/osh
@@ -70,7 +66,6 @@ SLBA=10240
 dd if="$BUILD/disk.img" of="$BUILD/boot.img" bs=512 seek=$SLBA conv=notrunc 2>/dev/null
 
 echo "==> Starting QEMU"
-# No timeout — interactive first-boot setup requires user input.
 qemu-system-riscv64 \
     -M virt -m 256M \
     -bios "$BOOT_DIR/bootloader.bin" \

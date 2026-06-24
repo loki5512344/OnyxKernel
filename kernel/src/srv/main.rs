@@ -143,7 +143,7 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
     } else {
         proc::PROC_RING_USER
     };
-    proc::create_user(
+    if let Err(e) = proc::create_user(
         r.entry,
         r.ustack,
         r.root_pa,
@@ -151,8 +151,10 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
         0,
         r.heap_brk,
         ring,
-    )
-    .ok();
+    ) {
+        crate::kerr!("kmain", "create_user failed: %s", Arg::from(e.as_str()));
+        crate::srv::klog::halt();
+    }
 
     csr::set_sstatus(SSTATUS_SIE);
     crate::kinf!(

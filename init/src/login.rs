@@ -68,27 +68,7 @@ pub unsafe extern "C" fn _start() -> ! {
             continue;
         }
 
-        let stored = match auth::read_shadow_password(username) {
-            Ok(p) => p,
-            Err(_) => {
-                syscalls::write(1, b"Login incorrect\n\n".as_ptr(), 17);
-                continue;
-            }
-        };
-
-        let stored_len = stored.iter().position(|&b| b == 0).unwrap_or(stored.len());
-        if password.len() != stored_len {
-            syscalls::write(1, b"Login incorrect\n\n".as_ptr(), 17);
-            continue;
-        }
-        let mut match_ok = true;
-        for i in 0..password.len() {
-            if password[i] != stored[i] {
-                match_ok = false;
-                break;
-            }
-        }
-        if !match_ok {
+        if !auth::verify_shadow_password(username, password) {
             syscalls::write(1, b"Login incorrect\n\n".as_ptr(), 17);
             continue;
         }

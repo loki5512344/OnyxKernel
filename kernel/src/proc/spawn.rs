@@ -24,6 +24,10 @@ pub unsafe fn create_user(
     heap_brk: u64,
     ring: u8,
 ) -> KResult<()> {
+    if entry == 0 {
+        crate::kerr!("create_user", "entry=0 — would cause page fault, rejecting");
+        return Err(Errno::Inval);
+    }
     let p = alloc_proc()?;
     (*p).pid = pid;
     (*p).ring = ring;

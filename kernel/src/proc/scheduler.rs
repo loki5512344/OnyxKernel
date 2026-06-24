@@ -71,6 +71,14 @@ pub unsafe fn sched_yield(tf: &mut TrapFrame) {
         *tf = (*G_CURRENT).tf;
         return;
     }
+    if (*next).tf.sepc == 0 {
+        crate::kerr!(
+            "sched",
+            "pid %d has sepc=0, halting",
+            onyx_core::fmt::Arg::from((*next).pid)
+        );
+        crate::srv::klog::halt();
+    }
     (*next).state = ProcState::Running;
     G_CURRENT = next;
     NEED_RESCHED = false;
