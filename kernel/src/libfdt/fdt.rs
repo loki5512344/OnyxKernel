@@ -5,6 +5,7 @@ pub struct FdtMemory {
     pub base: u64,
     pub size: u64,
 }
+#[derive(Clone, Copy)]
 pub struct FdtMmio {
     pub base: u64,
     pub irq: u32,
@@ -205,11 +206,7 @@ pub unsafe fn find_sdhci() -> Option<FdtMmio> {
         }
         false
     });
-    result.or(Some(FdtMmio {
-        base: 0x1080_0000,
-        irq: 7,
-        reg_shift: 0,
-    }))
+    result
 }
 
 pub unsafe fn find_uart() -> Option<FdtMmio> {

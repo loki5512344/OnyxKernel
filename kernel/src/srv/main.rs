@@ -58,10 +58,23 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
     }
 
     let mut ndevs = 0;
-    let bases = [0x1000_1000usize, 0x1000_8000, 0x1000_3000, 0x1000_4000];
-    for &b in &bases {
-        if virtio::probe(b) && virtio::init(b).is_ok() {
+    // Use FDT to discover VirtIO devices
+    let mut virtio_devs = [fdt::FdtMmio { base: 0, irq: 0, reg_shift: 0 }; 8];
+    let nfound = fdt::find_virtio(&mut virtio_devs, 8);
+    for dev in virtio_devs.iter().take(nfound) {
+        let b = dev.base as usize;
+        if b != 0 && virtio::probe(b) && virtio::init(b).is_ok() {
             ndevs += 1;
+        }
+    }
+    // Fallback: try hardcoded addresses if FDT found nothing
+    if nfound == 0 {
+        let bases = [0x1000_1000usize, 0x1000_2000, 0x1000_3000, 0x1000_4000,
+                     0x1000_5000, 0x1000_6000, 0x1000_7000, 0x1000_8000];
+        for &b in &bases {
+            if virtio::probe(b) && virtio::init(b).is_ok() {
+                ndevs += 1;
+            }
         }
     }
     crate::kinf!("virtio-blk", "%d device(s)", Arg::from(ndevs));
